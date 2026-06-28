@@ -6,7 +6,7 @@ on:
       bucket_name:
         description: 'Target S3 bucket name'
         required: true
-        default: 'leon-akeyless-demo-bucket-unique-2026'
+        default: 'leon-akeyless-github-plugin-aws-integration-demo-bucket'
 
 jobs:
   deploy-to-s3:
