@@ -1,4 +1,4 @@
-name: AWS Integration Demo via Akeyless
+name: Github Plugin Demo via AWS Integration
 
 on:
   workflow_dispatch:
