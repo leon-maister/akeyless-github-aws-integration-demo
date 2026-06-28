@@ -1,46 +1,77 @@
-name: AWS Integration Demo via Akeyless
+import os
+import json
+from datetime import datetime
+import boto3
+from botocore.exceptions import ClientError
 
-on:
-  workflow_dispatch:
-    inputs:
-      bucket_name:
-        description: 'Target S3 bucket name'
-        required: true
-        # Added 'leon-' prefix as requested
-        default: 'leon-akeyless-demo-bucket-unique-2026'
+def main():
+    # 1. Retrieve environment variables provided by GitHub Actions
+    creds_json_string = os.environ.get("AWS_CREDS_JSON")
+    bucket_name = os.environ.get("S3_BUCKET_NAME")
+    
+    if not creds_json_string or not bucket_name:
+        print("Error: Missing required environment variables.")
+        return
 
-jobs:
-  deploy-to-s3:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
+    try:
+        # 2. Parse the secret JSON payload coming from Akeyless
+        creds = json.loads(creds_json_string)
+        aws_access_key = creds.get("username")
+        aws_secret_key = creds.get("password")
+        
+    except json.JSONDecodeError:
+        print("Error: Failed to parse Akeyless secret as JSON.")
+        return
 
-    steps:
-      - name: Checkout repository code
-        uses: actions/checkout@v4
+    if not aws_access_key or not aws_secret_key:
+        print("Error: Extracted credentials are empty.")
+        return
 
-      - name: Fetch AWS credentials from Akeyless
-        uses: akeyless-community/akeyless-github-action@v1.1.2
-        id: fetch-secrets
-        with:
-          access-id: p-fm7yoqdlm4voom
-          access-type: jwt
-          api-url: https://api.akeyless.io
-          static-secrets: |
-            - name: "/Demo/GitHubPlugin-AWS-Integration/AWS-creds"
-              output-name: "aws_credentials_json"
+    # 3. Create a local text file containing the current date and time
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    file_name = "demo-timestamp.txt"
+    file_content = f"Deployment verified successfully via GitHub Actions and Akeyless!\nTimestamp: {current_time}\n"
+    
+    with open(file_name, "w") as file:
+        file.write(file_content)
+    print(f"Generated local file '{file_name}' with timestamp: {current_time}")
 
-      - name: Set up Python environment
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+    # 4. Initialize Boto3 S3 client
+    s3_client = boto3.client(
+        "s3",
+        aws_access_key_id=aws_access_key,
+        aws_secret_access_key=aws_secret_key
+    )
 
-      - name: Install required Python dependencies
-        run: pip install boto3
+    # 5. Check if the bucket exists, and create it if it does not
+    try:
+        print(f"Checking if S3 bucket '{bucket_name}' exists...")
+        s3_client.head_bucket(Bucket=bucket_name)
+        print(f"Bucket '{bucket_name}' already exists.")
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == '404':
+            print(f"Bucket '{bucket_name}' does not exist. Attempting to create it...")
+            try:
+                # Create bucket (defaults to us-east-1 configuration)
+                s3_client.create_bucket(Bucket=bucket_name)
+                print(f"Successfully created new S3 bucket: '{bucket_name}'")
+            except ClientError as ce:
+                print(f"Failed to create bucket: {ce}")
+                return
+        else:
+            print(f"Unexpected AWS error when checking bucket: {e}")
+            return
 
-      - name: Generate timestamp file and upload to AWS S3
-        env:
-          AWS_CREDS_JSON: ${{ steps.fetch-secrets.outputs.aws_credentials_json }}
-          S3_BUCKET_NAME: ${{ inputs.bucket_name }}
-        run: python main.py
+    # 6. Upload the generated timestamp file to your AWS S3 bucket
+    try:
+        print(f"Uploading '{file_name}' to S3 bucket '{bucket_name}'...")
+        s3_client.upload_file(file_name, bucket_name, file_name)
+        print("Success! The timestamp file has been uploaded and will persist in AWS.")
+    except ClientError as e:
+        print(f"AWS ClientError during upload: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+
+if __name__ == "__main__":
+    main()
